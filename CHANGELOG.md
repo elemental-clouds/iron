@@ -7,11 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- SNS - Topic
-- EC2 - EBS Volume
-
 ## [0.0.0] - 2022-10-29
 
 ### Added
 
+- partial draft of S3 CLI
 - Project init!
