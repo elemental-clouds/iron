@@ -15,6 +15,11 @@ yargs(process.argv.slice(2))
       alias: 'i',
       description: 'AWS resource ID',
     },
+    json: {
+      type: 'boolean',
+      alias: 'j',
+      description: 'display output as JSON',
+    },
   })
   .strict()
   .commandDir('s3', commandDirOptions)

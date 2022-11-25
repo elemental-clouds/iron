@@ -1,18 +1,24 @@
-import * as osmium from '@elemental-clouds/osmium';
-
 import { IronArgs, IronHandler } from '../../common';
 
 import { Arguments } from 'yargs';
+import { S3 } from '@elemental-clouds/osmium';
+import { S3 as service } from '@elemental-clouds/oxygen';
 
-export const command = 'control';
+export const command = 'controls';
 export const describe = 'S3 bucket public access control toggles';
-export const builder = IronHandler.setupBuilder();
+export const builder = IronHandler.setupBuilder(service);
 
 export const handler = async function (args: Arguments<IronArgs>) {
-  const iron = new IronHandler({
+  const scanner = await new IronHandler({
     ...args,
-    Scanner: osmium.S3.Buckets,
+    service,
+    Scanner: S3.Buckets,
+  }).scan();
+
+  console.log({
+    'scanner.controlResults.length': scanner.controlResults.length,
+    'scanner.inventory.length': scanner.inventory.length,
   });
 
-  await iron.getControlResults();
+  scanner.displayResults();
 };

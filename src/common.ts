@@ -10,7 +10,6 @@ import {
 
 import { CommandBuilder } from 'yargs';
 import { Common } from '@elemental-clouds/osmium/lib/Common';
-import { S3 as Service } from '@elemental-clouds/oxygen';
 import assert from 'assert';
 import titanium from '@elemental-clouds/titanium';
 
@@ -19,102 +18,130 @@ export const commandDirOptions = {
   extensions: ['js', 'ts'],
 };
 
+type Scanner = new (args: CredentialedClassArgs) => Common;
+
 export interface IronArgs {
-  regions: AWSRegionName[];
+  json: boolean;
   profile?: AWSProfileName;
+  regions: AWSRegionName[];
   resourceIds?: ResourceName[];
 }
 
 interface IronHandlerInterface extends IronArgs {
-  Scanner: new (args: CredentialedClassArgs) => Common;
+  Scanner: Scanner;
+  service: Service;
+  global?: boolean;
 }
 
-export class IronHandler {
-  args: IronHandlerInterface;
-  regions?: AWSRegionName[];
-  profile?: AWSProfileName;
-  resourceIds?: ResourceName[];
-  results: FinalControlValidationResult[] = [];
+type Service = { [key: string]: ControlProcedure };
 
+export class IronHandlerStatic {
   static getService(service: object) {
-    return service as { [key: string]: ControlProcedure };
+    return service as Service;
   }
 
-  static getServiceControls(service: object) {
-    return Object.keys(service);
-  }
-
-  static setupBuilder() {
-    const service = IronHandler.getService(Service);
-    const controls = IronHandler.getServiceControls(Service);
+  static setupBuilder(controls: object) {
+    const service = IronHandler.getService(controls);
+    const _controls = Object.keys(controls);
 
     const builder: CommandBuilder = {};
 
-    for (const control of controls) {
-      const _name = service[control]?.name;
+    for (const control of _controls) {
+      const controlName = service[control]?.name;
       const description = service[control]?.description;
 
       assert(service[control], `unknown control ${control}`);
-      assert(_name, 'missing control name');
+      assert(controlName, 'missing control name');
       assert(description, 'missing control description');
 
-      builder[_name] = {
+      builder[controlName] = {
         description,
       };
     }
+
     return builder;
   }
+}
+
+export class IronHandler extends IronHandlerStatic {
+  Scanner: Scanner;
+  args: IronHandlerInterface;
+  controlNames: string[];
+  global: boolean | undefined = false;
+  inventory: CommonInventoryItem[] = [];
+  profile?: AWSProfileName;
+  regions: AWSRegionName[];
+  resourceIds?: ResourceName[];
+  controlResults: FinalControlValidationResult[] = [];
+  service: Service;
 
   constructor(args: IronHandlerInterface) {
+    super();
+    this.Scanner = args.Scanner;
     this.args = args;
-    this.regions = args.regions;
+    this.controlNames = Object.keys(args.service);
+    this.global = args.global;
     this.profile = args.profile;
+    this.regions = args.regions;
     this.resourceIds = args.resourceIds;
+    this.service = IronHandler.getService(args.service);
   }
 
-  getFirstRegionInArgs(regions: AWSRegionName[] | undefined) {
-    assert(Array.isArray(regions));
-    assert(regions.length === 1);
+  async scan() {
+    for (const region of this.regions) {
+      this.inventory.push(...(await this.getInventory(region)));
+    }
 
-    const region = regions[0];
+    for (const controlName of this.controlNames) {
+      if (controlName in this.args) {
+        const control = this.service[controlName];
+        assert(control, `unknown control ${controlName}`);
+        for (const item of this.inventory) {
+          this.controlResults.push(titanium(item, control));
+        }
+      }
+    }
 
-    assert(region, 'unable to determine region');
-    return region;
+    return this;
   }
 
-  async getInventory() {
-    const { regions, profile, resourceIds, Scanner } = this.args;
-    const region = this.getFirstRegionInArgs(regions);
+  displayResults() {
+    if (this.controlNames.length === 0) {
+      if (this.args.json) {
+        for (const item of this.inventory) {
+          console.log(JSON.stringify(item, null, 2));
+        }
+      } else {
+        for (const item of this.inventory) {
+          console.log(item.urn);
+        }
+      }
+    } else {
+      if (this.args.json) {
+        for (const result of this.controlResults) {
+          console.log(JSON.stringify(result, null, 2));
+        }
+      } else {
+        for (const result of this.controlResults) {
+          console.log(
+            result.controlProcedure.name.padEnd(30),
+            result.result.padEnd(15),
+            result.item.resourceId
+          );
+        }
+      }
+    }
+  }
 
-    const scanner = new Scanner({ region, profile });
+  async getInventory(region: AWSRegionName) {
+    const scanner = new this.Scanner({ region, profile: this.profile });
 
-    if (resourceIds) {
-      scanner.addResource({ resources: resourceIds });
+    if (this.resourceIds) {
+      scanner.addResource({ resources: this.resourceIds });
     }
 
     await scanner.enumerate();
 
     return scanner.inventory as unknown as CommonInventoryItem[];
-  }
-
-  async getControlResults() {
-    const controls = IronHandler.getServiceControls(Service);
-    const service = IronHandler.getService(Service);
-
-    for (const control of controls) {
-      if (control in this.args) {
-        for (const item of await this.getInventory()) {
-          const procedure = service[control]?.procedure;
-          assert(procedure, `unknown control ${control} procedure`);
-          this.results.push(
-            titanium(item, procedure) as unknown as FinalControlValidationResult
-          );
-        }
-      }
-    }
-
-    for (const result of this.results) {
-      console.log(JSON.stringify(result, null, 2));
-    }
   }
 }
